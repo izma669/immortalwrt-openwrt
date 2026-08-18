@@ -1710,16 +1710,16 @@ endef
 TARGET_DEVICES += youhua_wr1200js
 
 
-define Device/youhua_wr1200js_32m
+define Device/youhua_wr330-32m
   $(Device/dsa-migration)
   IMAGE_SIZE := 32448k
   DEVICE_VENDOR := YouHua
-  DEVICE_MODEL := WR1200JS
+  DEVICE_MODEL := WR330-32M
   DEVICE_VARIANT := 32M
   DEVICE_PACKAGES := kmod-mt7603 kmod-mt76x2 kmod-usb3 \
 	kmod-usb-ledtrig-usbport
 endef
-TARGET_DEVICES += youhua_wr1200js_32m
+TARGET_DEVICES += youhua_wr330-32m
 
 define Device/youku_yk-l2
   $(Device/dsa-migration)

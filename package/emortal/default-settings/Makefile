@@ -22,7 +22,7 @@ define Package/default-settings
   SECTION:=luci
   CATEGORY:=LuCI
   TITLE:=LuCI support for Default Settings
-  DEPENDS:=+luci
+  DEPENDS:=+nginx
   PKGARCH:=all
   DEPENDS:=+luci-lib-base
 endef

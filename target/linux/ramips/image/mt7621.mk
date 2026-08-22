@@ -1016,6 +1016,15 @@ define Device/youhua_wr1200js
 endef
 TARGET_DEVICES += youhua_wr1200js
 
+define Device/youhua_wr330-32m
+  IMAGE_SIZE := 32448k
+  DEVICE_VENDOR := YouHua
+  DEVICE_MODEL := WR330-32M
+  DEVICE_PACKAGES := kmod-mt7603 kmod-mt76x2 kmod-usb3 \
+	kmod-usb-ledtrig-usbport wpad-openssl
+endef
+TARGET_DEVICES += youhua_wr330-32m
+
 define Device/youku_yk-l2
   IMAGE_SIZE := 16064k
   DEVICE_VENDOR := Youku

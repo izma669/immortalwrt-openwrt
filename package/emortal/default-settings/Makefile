@@ -18,7 +18,14 @@ PKG_LICENSE:=GPL-3.0
 
 include $(INCLUDE_DIR)/package.mk
 
-
+define Package/default-settings
+  SECTION:=luci
+  CATEGORY:=LuCI
+  TITLE:=LuCI support for Default Settings
+  DEPENDS:=+luci
+  PKGARCH:=all
+  DEPENDS:=+luci-lib-base
+endef
 
 define Package/default-settings-chn
   $(Package/default-settings)

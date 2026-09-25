@@ -1,0 +1,23 @@
+
+config main global
+	option uci_enable 'true'
+
+config server '_lan'
+	list listen '443 ssl default_server'
+	list listen '[::]:443 ssl default_server'
+	option server_name '_lan'
+#	list include 'restrict_locally' #鍔犺浇IP闄愬埗鍒楄〃
+	list include 'conf.d/*.locations'
+	option uci_manage_ssl 'self-signed'
+	option ssl_certificate '/etc/nginx/conf.d/_lan.crt'
+	option ssl_certificate_key '/etc/nginx/conf.d/_lan.key'
+	option ssl_session_cache 'shared:SSL:32k'
+	option ssl_session_timeout '64m'
+	option access_log 'off; # logd openwrt'
+
+config server '_lan_http'
+	list listen '80'
+	list listen '[::]:80'
+	option server_name '_lan'
+	list include 'conf.d/*.locations'
+	# 其他 root、index 等按你的站点配置补充

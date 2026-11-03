@@ -695,6 +695,21 @@ define Device/cmcc_rax3000me
 endef
 TARGET_DEVICES += cmcc_rax3000me
 
+define Device/clx_s20p
+  DEVICE_VENDOR := CLX
+  DEVICE_MODEL := S20P
+  DEVICE_DTS := mt7986a-clx-s20p
+  DEVICE_DTS_DIR := ../dts
+  SUPPORTED_DEVICES += clx,s20p
+  # RTL8221B 2.5G PHYs are handled by the built-in CONFIG_REALTEK_PHY driver
+  DEVICE_PACKAGES := kmod-usb3 kmod-mt7915e kmod-mt7986-firmware mt7986-wo-firmware \
+	automount f2fsck mkf2fs
+  IMAGES += factory.bin
+  IMAGE/factory.bin := append-kernel | pad-to 32M | append-rootfs
+  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+endef
+TARGET_DEVICES += clx_s20p
+
 define Device/comfast_cf-e393ax
   DEVICE_VENDOR := COMFAST
   DEVICE_MODEL := CF-E393AX

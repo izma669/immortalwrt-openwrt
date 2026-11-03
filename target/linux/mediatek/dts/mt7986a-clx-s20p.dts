@@ -28,7 +28,7 @@
 
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0 0x40000000 0 0x10000000>;
+		reg = <0 0x40000000 0 0x20000000>;
 	};
 
 	reg_1p8v: regulator-1p8v {
@@ -117,6 +117,8 @@
 			reset-deassert-us = <100000>;
 			reset-gpios = <&pio 6 GPIO_ACTIVE_LOW>;
 			realtek,aldps-enable;
+			/* LED0..2: 10M/100M/1000M/2500M link select */
+			realtek,led-link-select = <0x27 0x27 0x27>;
 		};
 
 		/* 2.5G LAN PHY, connected to MT7531 port 5 */
@@ -127,6 +129,8 @@
 			reset-deassert-us = <100000>;
 			reset-gpios = <&pio 48 GPIO_ACTIVE_LOW>;
 			realtek,aldps-enable;
+			/* LED0..2: 10M/100M/1000M/2500M link select */
+			realtek,led-link-select = <0x27 0x27 0x27>;
 		};
 
 		switch: switch@1f {
@@ -140,12 +144,12 @@
 
 				port@0 {
 					reg = <0>;
-					label = "lan1";
+					label = "lan5";
 				};
 
 				port@1 {
 					reg = <1>;
-					label = "lan2";
+					label = "lan4";
 				};
 
 				port@2 {
@@ -155,12 +159,17 @@
 
 				port@3 {
 					reg = <3>;
-					label = "lan4";
+					label = "lan2";
+				};
+
+				port@4 {
+					reg = <4>;
+					label = "lan1";
 				};
 
 				port@5 {
 					reg = <5>;
-					label = "lan5";
+					label = "lan6";
 					phy-mode = "2500base-x";
 					phy-handle = <&phy5>;
 				};

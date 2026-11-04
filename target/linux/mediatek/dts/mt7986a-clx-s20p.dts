@@ -298,9 +298,17 @@
 				block-partition-env {
 					partname = "u-boot-env";
 
-					nvmem-layout {
-						compatible = "u-boot,env";
-					};
+					/*
+					 * The vendor U-Boot keeps a non standard
+					 * environment here (4 byte CRC, 4 byte flags,
+					 * a JSON "fw_info" blob and then the plain
+					 * variables), so the generic "u-boot,env"
+					 * nvmem layout cannot validate it and fails
+					 * to probe with -EINVAL.  Nothing in this
+					 * device reads the environment through
+					 * nvmem, so keep the partition only as a
+					 * description of the flash layout.
+					 */
 				};
 
 				block-partition-factory {

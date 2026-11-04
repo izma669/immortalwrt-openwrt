@@ -1,0 +1,42 @@
+#!/bin/sh /etc/rc.common
+# CLX S20P board glue.
+#
+# 1) The 2.5G "WAN1" jack is a standalone RTL8221B wired to gmac1, so the
+#    kernel enumerates it as "eth1" (eth0 is the DSA conduit of the MT7531
+#    switch).  Rename it to "wan1" before netifd starts, so that board.json,
+#    the UCI configuration and the LuCI port overview all agree with the
+#    label printed on the case.
+# 2) The stock LuCI port overview sorts the tiles by netdev name, which puts
+#    wan1 last and lan1 first.  A patched view is shipped in
+#    /usr/share/clx-s20p and copied over /www when it differs (the file
+#    belongs to luci-mod-status, so it cannot simply be installed by this
+#    package - opkg refuses to overwrite another package's file).
+
+START=19
+STOP=89
+
+start() {
+	[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "clx,s20p" ] || return 0
+
+	# --- port naming -------------------------------------------------
+	if [ ! -e /sys/class/net/wan1 ] && [ -e /sys/class/net/eth1 ]; then
+		case "$(ls -d /sys/class/net/eth1/lower_* 2>/dev/null)" in
+		"")
+			# standalone GMAC, not a DSA slave port
+			ip link set dev eth1 down 2>/dev/null
+			ip link set dev eth1 name wan1 2>/dev/null
+			;;
+		esac
+	fi
+
+	# --- LuCI port overview -------------------------------------------
+	local src=/usr/share/clx-s20p/29_ports.js
+	local dst=/www/luci-static/resources/view/status/include/29_ports.js
+
+	[ -f "$src" ] || return 0
+	cmp -s "$src" "$dst" 2>/dev/null || cp -f "$src" "$dst"
+}
+
+stop() {
+	return 0
+}

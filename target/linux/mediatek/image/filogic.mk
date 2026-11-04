@@ -703,7 +703,7 @@ define Device/clx_s20p
   SUPPORTED_DEVICES += clx,s20p
   # RTL8221B 2.5G PHYs are handled by the built-in CONFIG_REALTEK_PHY driver
   DEVICE_PACKAGES := kmod-usb3 kmod-mt7915e kmod-mt7986-firmware mt7986-wo-firmware \
-	automount f2fsck mkf2fs
+	automount f2fsck mkf2fs clx-s20p-files
   IMAGES += factory.bin
   IMAGE/factory.bin := append-kernel | pad-to 32M | append-rootfs
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata

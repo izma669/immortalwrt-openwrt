@@ -72,7 +72,7 @@ mediatek_setup_interfaces()
 		ucidef_set_interfaces_lan_wan "lan1 lan2 lan3 lan4" eth1
 		;;
 	clx,s20p)
-		ucidef_set_interfaces_lan_wan "lan6 lan5 lan4 lan3 lan2 lan1" eth1
+		ucidef_set_interfaces_lan_wan "lan6 lan5 lan4 lan3 lan2 lan1" wan1
 		;;
 	asus,tuf-ax4200q|\
 	asus,tuf-ax6000|\

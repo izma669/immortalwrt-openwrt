@@ -1,0 +1,15 @@
+#!/bin/sh
+# CLX S20P: migrate an existing configuration to the "wan1" netdev name.
+#
+# Fresh installations get the name from /etc/board.json (board.d/02_network),
+# but sysupgrade keeps /etc, so rewrite the stored configuration once.
+
+[ -f /etc/config/network ] && {
+	sed -i "s/^\(\s*option device \)'eth1'$/\1'wan1'/" /etc/config/network
+}
+
+[ -f /etc/board.json ] && {
+	sed -i 's/"device": "eth1"/"device": "wan1"/' /etc/board.json
+}
+
+exit 0

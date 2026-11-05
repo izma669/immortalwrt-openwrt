@@ -1,0 +1,351 @@
+file: add support for HTTP Range requests
+
+Serve single byte ranges from static files so that clients can resume
+interrupted downloads and seek within media files.
+
+The Range header is parsed for GET requests and a 206 Partial Content
+response with a Content-Range header is returned when the requested
+range is satisfiable.  Suffix ranges ("bytes=-N") and open ended ranges
+("bytes=N-") are supported, the last byte position is clamped to the
+end of the file and multi-range requests are ignored by serving the
+complete representation, as permitted by RFC 9110.
+
+Requests for an unsatisfiable range are answered with 416 Range Not
+Satisfiable and a Content-Range header describing the current length.
+Accept-Ranges: bytes is now advertised for all static files.
+
+If-Range is evaluated properly: a matching strong entity tag or an
+exact Last-Modified date keeps the range, anything else disables it and
+the full file is sent instead of unconditionally failing with 412.
+---
+
+--- a/file.c
++++ b/file.c
+@@ -65,7 +65,19 @@
+ 	HDR_IF_MATCH,
+ 	HDR_IF_NONE_MATCH,
+ 	HDR_IF_RANGE,
++	HDR_RANGE,
+ 	__HDR_MAX
++};
++
++enum uh_range_result {
++	UH_RANGE_NONE,
++	UH_RANGE_OK,
++	UH_RANGE_UNSATISFIABLE,
++};
++
++struct uh_file_range {
++	uint64_t start;
++	uint64_t length;
+ };
+ 
+ void uh_index_add(const char *filename)
+@@ -355,6 +367,26 @@
+ 	return uh_file_response_ok_hdrs(cl, s);
+ }
+ 
++static void uh_file_response_206(struct client *cl, struct stat *s,
++				 struct uh_file_range *range)
++{
++	uh_http_header(cl, 206, "Partial Content");
++	ustream_printf(cl->us, "Content-Range: bytes %" PRIu64 "-%" PRIu64 "/%" PRIu64 "\r\n",
++		       range->start, range->start + range->length - 1,
++		       (uint64_t)s->st_size);
++	return uh_file_response_ok_hdrs(cl, s);
++}
++
++static void uh_file_response_416(struct client *cl, struct stat *s)
++{
++	uh_http_header(cl, 416, "Range Not Satisfiable");
++	ustream_printf(cl->us, "Accept-Ranges: bytes\r\n");
++	ustream_printf(cl->us, "Content-Range: bytes */%" PRIu64 "\r\n",
++		       (uint64_t)s->st_size);
++	ustream_printf(cl->us, "Content-Type: text/html\r\n");
++	ustream_printf(cl->us, "Content-Length: 0\r\n\r\n");
++}
++
+ static void uh_file_response_304(struct client *cl, struct stat *s)
+ {
+ 	uh_http_header(cl, 304, "Not Modified");
+@@ -443,16 +475,20 @@
+ 	return true;
+ }
+ 
+-static int uh_file_if_range(struct client *cl, struct stat *s)
+-{
++static bool uh_file_if_range_match(struct client *cl, struct stat *s)
++{
++	char buf[128];
+ 	char *hdr = uh_file_header(cl, HDR_IF_RANGE);
+ 
+-	if (hdr) {
+-		uh_file_response_412(cl);
+-		return false;
+-	}
+-
+-	return true;
++	if (!hdr)
++		return true;
++
++	/* entity-tag: only strong validators may be used for If-Range */
++	if (hdr[0] == '"')
++		return !strcmp(hdr, uh_file_mktag(s, buf, sizeof(buf)));
++
++	/* HTTP-date: must be an exact match of the Last-Modified value */
++	return uh_file_date2unix(hdr) == (time_t)s->st_mtime;
+ }
+ 
+ static int uh_file_if_unmodified_since(struct client *cl, struct stat *s)
+@@ -574,10 +610,21 @@
+ static void file_write_cb(struct client *cl)
+ {
+ 	int fd = cl->dispatch.file.fd;
++	uint64_t remain = cl->dispatch.file.remain;
+ 	int r;
+ 
+ 	while (cl->us->w.data_bytes < 256) {
+-		r = read(fd, uh_buf, sizeof(uh_buf));
++		unsigned int len = sizeof(uh_buf);
++
++		if (remain < len)
++			len = remain;
++
++		if (!len) {
++			uh_request_done(cl);
++			return;
++		}
++
++		r = read(fd, uh_buf, len);
+ 		if (r < 0) {
+ 			if (errno == EINTR)
+ 				continue;
+@@ -591,6 +638,9 @@
+ 			return;
+ 		}
+ 
++		remain -= r;
++		cl->dispatch.file.remain = remain;
++
+ 		uh_chunk_write(cl, uh_buf, r);
+ 	}
+ }
+@@ -600,13 +650,141 @@
+ 	close(cl->dispatch.file.fd);
+ }
+ 
++static void uh_range_skip_ws(const char **str)
++{
++	while (**str == ' ' || **str == '\t')
++		(*str)++;
++}
++
++static bool uh_range_parse_u64(const char **str, uint64_t *val)
++{
++	const char *p = *str;
++	uint64_t v = 0;
++	bool found = false;
++
++	while (*p >= '0' && *p <= '9') {
++		unsigned int digit = *p - '0';
++
++		if (v > (UINT64_MAX - digit) / 10)
++			return false;
++
++		v = v * 10 + digit;
++		found = true;
++		p++;
++	}
++
++	if (!found)
++		return false;
++
++	*val = v;
++	*str = p;
++
++	return true;
++}
++
++static enum uh_range_result
++uh_file_parse_range(const char *str, uint64_t size, struct uh_file_range *range)
++{
++	uint64_t first, last;
++	const char *p;
++
++	if (!str)
++		return UH_RANGE_NONE;
++
++	uh_range_skip_ws(&str);
++
++	if (strncasecmp(str, "bytes", 5))
++		return UH_RANGE_NONE;
++
++	p = str + 5;
++	uh_range_skip_ws(&p);
++
++	if (*p != '=')
++		return UH_RANGE_NONE;
++
++	p++;
++	uh_range_skip_ws(&p);
++
++	/* only single ranges are supported, serve the full entity instead */
++	if (strchr(p, ','))
++		return UH_RANGE_NONE;
++
++	/* an empty entity cannot be satisfied by any range */
++	if (!size)
++		return UH_RANGE_UNSATISFIABLE;
++
++	/* suffix range, e.g. "bytes=-500" */
++	if (*p == '-') {
++		p++;
++		uh_range_skip_ws(&p);
++
++		if (!uh_range_parse_u64(&p, &last))
++			return UH_RANGE_NONE;
++
++		uh_range_skip_ws(&p);
++
++		if (*p)
++			return UH_RANGE_NONE;
++
++		if (!last)
++			return UH_RANGE_UNSATISFIABLE;
++
++		if (last > size)
++			last = size;
++
++		range->start = size - last;
++		range->length = last;
++
++		return UH_RANGE_OK;
++	}
++
++	if (!uh_range_parse_u64(&p, &first))
++		return UH_RANGE_NONE;
++
++	uh_range_skip_ws(&p);
++
++	if (*p != '-')
++		return UH_RANGE_NONE;
++
++	p++;
++	uh_range_skip_ws(&p);
++
++	/* open ended range, e.g. "bytes=500-" */
++	if (!*p) {
++		last = size - 1;
++	} else {
++		if (!uh_range_parse_u64(&p, &last))
++			return UH_RANGE_NONE;
++
++		uh_range_skip_ws(&p);
++
++		if (*p)
++			return UH_RANGE_NONE;
++	}
++
++	if (first >= size || first > last)
++		return UH_RANGE_UNSATISFIABLE;
++
++	if (last >= size)
++		last = size - 1;
++
++	range->start = first;
++	range->length = last - first + 1;
++
++	return UH_RANGE_OK;
++}
++
+ static void uh_file_data(struct client *cl, struct path_info *pi, int fd)
+ {
++	struct uh_file_range range = { 0 };
++	enum uh_range_result range_result = UH_RANGE_NONE;
++	uint64_t size = (uint64_t)pi->stat.st_size;
++	uint64_t length = size;
++
+ 	/* test preconditions */
+ 	if (!cl->dispatch.no_cache &&
+ 	    (!uh_file_if_modified_since(cl, &pi->stat) ||
+ 	     !uh_file_if_match(cl, &pi->stat) ||
+-	     !uh_file_if_range(cl, &pi->stat) ||
+ 	     !uh_file_if_unmodified_since(cl, &pi->stat) ||
+ 	     !uh_file_if_none_match(cl, &pi->stat))) {
+ 		ustream_printf(cl->us, "\r\n");
+@@ -615,14 +793,45 @@
+ 		return;
+ 	}
+ 
++	if (cl->request.method == UH_HTTP_MSG_GET) {
++		range_result = uh_file_parse_range(uh_file_header(cl, HDR_RANGE),
++						   size, &range);
++
++		/* an If-Range validator that does not match disables the range */
++		if (range_result == UH_RANGE_OK &&
++		    !uh_file_if_range_match(cl, &pi->stat))
++			range_result = UH_RANGE_NONE;
++	}
++
++	if (range_result == UH_RANGE_UNSATISFIABLE) {
++		uh_file_response_416(cl, &pi->stat);
++		uh_request_done(cl);
++		close(fd);
++		return;
++	}
++
++	if (range_result == UH_RANGE_OK) {
++		off_t ofs = (off_t)range.start;
++
++		if (ofs < 0 || (uint64_t)ofs != range.start ||
++		    lseek(fd, ofs, SEEK_SET) < 0) {
++			range_result = UH_RANGE_NONE;
++		} else {
++			length = range.length;
++		}
++	}
++
+ 	/* write status */
+-	uh_file_response_200(cl, &pi->stat);
+-
++	if (range_result == UH_RANGE_OK)
++		uh_file_response_206(cl, &pi->stat, &range);
++	else
++		uh_file_response_200(cl, &pi->stat);
++
++	ustream_printf(cl->us, "Accept-Ranges: bytes\r\n");
+ 	ustream_printf(cl->us, "Content-Type: %s\r\n",
+ 			   uh_file_mime_lookup(pi->name));
+ 
+-	ustream_printf(cl->us, "Content-Length: %" PRIu64 "\r\n\r\n",
+-			   pi->stat.st_size);
++	ustream_printf(cl->us, "Content-Length: %" PRIu64 "\r\n\r\n", length);
+ 
+ 
+ 	/* send body */
+@@ -633,6 +842,7 @@
+ 	}
+ 
+ 	cl->dispatch.file.fd = fd;
++	cl->dispatch.file.remain = length;
+ 	cl->dispatch.write_cb = file_write_cb;
+ 	cl->dispatch.free = uh_file_free;
+ 	cl->dispatch.close_fds = uh_file_free;
+@@ -847,6 +1057,7 @@
+ 		[HDR_IF_MATCH] = { "if-match", BLOBMSG_TYPE_STRING },
+ 		[HDR_IF_NONE_MATCH] = { "if-none-match", BLOBMSG_TYPE_STRING },
+ 		[HDR_IF_RANGE] = { "if-range", BLOBMSG_TYPE_STRING },
++		[HDR_RANGE] = { "range", BLOBMSG_TYPE_STRING },
+ 	};
+ 	struct dispatch_handler *d;
+ 	struct blob_attr *tb[__HDR_MAX];
+--- a/uhttpd.h
++++ b/uhttpd.h
+@@ -259,6 +259,7 @@
+ 		struct {
+ 			struct blob_attr **hdr;
+ 			int fd;
++			uint64_t remain;
+ 		} file;
+ 		struct dispatch_proc proc;
+ #ifdef HAVE_UBUS
